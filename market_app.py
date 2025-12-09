@@ -167,6 +167,24 @@ else:
     sym = STOCK_DICT[search_mode]
     final_ticker = sym if sym.startswith("^") else f"{sym}{suffix}"
 
+# --- CHANGE: Analysis Button Moved Here ---
+run_analysis = st.sidebar.button("Run Sniper Analysis", use_container_width=True)
+st.sidebar.markdown("---")
+
+# --- CHANGE: Market Screener Section ---
+st.sidebar.header("2. Nifty 100 Scanner")
+st.sidebar.caption("Scan for top BUY signals")
+
+# Confirmation Checkbox
+enable_scan = st.sidebar.checkbox("Enable Scan")
+
+# Scan Button (Controlled by Checkbox)
+if enable_scan:
+    run_scan = st.sidebar.button("Scan Market Now", use_container_width=True)
+else:
+    run_scan = False
+    st.sidebar.button("Scan Market Now", disabled=True, use_container_width=True)
+
 period = "1y" 
 
 # --- Logic: Fetch Data (CACHED) ---
@@ -323,8 +341,61 @@ def get_verdict(row):
     elif total_score <= -2: return "SELL", "orange", "Negative Outlook", reasons
     else: return "HOLD / WAIT", "gray", "Market is sideways", reasons
 
-# --- Main App ---
-if st.sidebar.button("Run Sniper Analysis"):
+# --- NEW: MARKET SCANNER LOGIC ---
+def scan_market():
+    results = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # Get Nifty tickers (skip indices)
+    tickers = [v + ".NS" for k, v in STOCK_DICT.items() if not v.startswith("^")]
+    tickers = list(set(tickers)) 
+    total = len(tickers)
+    
+    for i, ticker in enumerate(tickers):
+        status_text.text(f"Scanning {i+1}/{total}: {ticker}...")
+        try:
+            df = yf.download(ticker, period="1y", progress=False)
+            if not df.empty and len(df) > 200:
+                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+                df = calculate(df).dropna()
+                if not df.empty:
+                    last = df.iloc[-1]
+                    verdict, color, subtitle, reasons = get_verdict(last)
+                    
+                    # Only show BUY opportunities
+                    if "BUY" in verdict:
+                        results.append({
+                            "Stock": ticker.replace(".NS", ""),
+                            "Signal": verdict,
+                            "Price": round(last['Close'], 2),
+                            "RSI": round(last['RSI'], 1),
+                            "Reason": reasons[0] if reasons else "Trend"
+                        })
+        except: pass
+        progress_bar.progress((i + 1) / total)
+        
+    status_text.empty()
+    progress_bar.empty()
+    return pd.DataFrame(results).sort_values(by="RSI", ascending=True)
+
+# --- MAIN EXECUTION ---
+
+# 1. MARKET SCANNER EXECUTION
+if run_scan:
+    st.header("🎯 Nifty 100 Market Scanner")
+    st.info("Scanning for High-Probability BUY signals... To STOP scan, click the 'X' (Stop) in your browser tab.")
+    
+    results_df = scan_market()
+    
+    if not results_df.empty:
+        st.success(f"Scan Complete! Found {len(results_df)} opportunities.")
+        st.dataframe(results_df, use_container_width=True)
+    else:
+        st.warning("No strong BUY signals found right now.")
+
+# 2. SINGLE STOCK ANALYSIS EXECUTION
+elif run_analysis:
     with st.spinner('Accessing Market Data...'):
         df = get_data(final_ticker, period)
         if not df.empty:
@@ -431,3 +502,5 @@ if st.sidebar.button("Run Sniper Analysis"):
 
             else: st.error("Not enough data.")
         else: st.error("Stock not found.")
+else:
+    st.info("👈 Select a stock and click 'Run Sniper Analysis' in the sidebar.")
