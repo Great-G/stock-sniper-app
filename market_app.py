@@ -168,7 +168,7 @@ else:
     final_ticker = sym if sym.startswith("^") else f"{sym}{suffix}"
 
 # --- CHANGE: Analysis Button Moved Here ---
-run_analysis = st.sidebar.button("Run Sniper Analysis", use_container_width=True)
+run_analysis = st.sidebar.button("🚀 Run Sniper Analysis", use_container_width=True)
 st.sidebar.markdown("---")
 
 # --- CHANGE: Market Screener Section ---
@@ -176,14 +176,19 @@ st.sidebar.header("2. Nifty 100 Scanner")
 st.sidebar.caption("Scan for top BUY signals")
 
 # Confirmation Checkbox
-enable_scan = st.sidebar.checkbox("Enable Scan")
+enable_scan = st.sidebar.checkbox("✅ Enable Scan")
 
 # Scan Button (Controlled by Checkbox)
 if enable_scan:
-    run_scan = st.sidebar.button("Scan Market Now", use_container_width=True)
+    run_scan = st.sidebar.button("🔍 Scan Market Now", use_container_width=True)
 else:
     run_scan = False
-    st.sidebar.button("Scan Market Now", disabled=True, use_container_width=True)
+    st.sidebar.button("🔍 Scan Market Now", disabled=True, use_container_width=True)
+
+# --- NEW: MARKET MOVERS SECTION ---
+st.sidebar.markdown("---")
+st.sidebar.header("3. Market Dashboard")
+show_movers = st.sidebar.button("📊 Show Top Gainers/Losers", use_container_width=True)
 
 period = "1y" 
 
@@ -267,7 +272,7 @@ def calculate(df):
 
     return df
 
-# --- Logic: Pivot Points (NEW) ---
+# --- Logic: Pivot Points ---
 def calculate_pivots(df):
     last = df.iloc[-1]
     high = last['High']
@@ -284,6 +289,71 @@ def calculate_pivots(df):
     s3 = low - 2 * (high - pivot)
     
     return {"P": pivot, "R1": r1, "S1": s1, "R2": r2, "S2": s2, "R3": r3, "S3": s3}
+
+# --- NEW: CANDLESTICK RECOGNITION ---
+def check_patterns(df):
+    if len(df) < 2: return []
+    curr = df.iloc[-1]
+    prev = df.iloc[-2]
+    patterns = []
+    
+    # Helper for candle size
+    body = abs(curr['Close'] - curr['Open'])
+    wick_upper = curr['High'] - max(curr['Close'], curr['Open'])
+    wick_lower = min(curr['Close'], curr['Open']) - curr['Low']
+    
+    # 1. Bullish Engulfing
+    if prev['Close'] < prev['Open'] and curr['Close'] > curr['Open']:
+        if curr['Open'] < prev['Close'] and curr['Close'] > prev['Open']:
+            patterns.append("Bullish Engulfing")
+            
+    # 2. Bearish Engulfing
+    if prev['Close'] > prev['Open'] and curr['Close'] < curr['Open']:
+        if curr['Open'] > prev['Close'] and curr['Close'] < prev['Open']:
+            patterns.append("Bearish Engulfing")
+            
+    # 3. Hammer (Small body, long lower wick)
+    if wick_lower > 2 * body and wick_upper < body:
+        patterns.append("Hammer")
+        
+    # 4. Shooting Star (Small body, long upper wick)
+    if wick_upper > 2 * body and wick_lower < body:
+        patterns.append("Shooting Star")
+        
+    # 5. Doji (Tiny body)
+    if body <= (curr['High'] - curr['Low']) * 0.1:
+        patterns.append("Doji")
+        
+    return patterns
+
+# --- NEW: VISUAL GENERATOR (Draws the candle image) ---
+def get_pattern_viz(pattern_name):
+    fig = go.Figure()
+    
+    if "Bullish Engulfing" in pattern_name:
+        # Red candle then Big Green candle
+        fig.add_trace(go.Candlestick(x=[0], open=[10], high=[10.5], low=[9.5], close=[9.8], increasing_line_color='green', decreasing_line_color='red'))
+        fig.add_trace(go.Candlestick(x=[1], open=[9.5], high=[11], low=[9], close=[10.8], increasing_line_color='green', decreasing_line_color='red'))
+        
+    elif "Bearish Engulfing" in pattern_name:
+        # Green candle then Big Red candle
+        fig.add_trace(go.Candlestick(x=[0], open=[9.8], high=[10.5], low=[9.5], close=[10.2], increasing_line_color='green', decreasing_line_color='red'))
+        fig.add_trace(go.Candlestick(x=[1], open=[10.5], high=[10.8], low=[9], close=[9.2], increasing_line_color='green', decreasing_line_color='red'))
+        
+    elif "Hammer" in pattern_name:
+        # Long lower wick
+        fig.add_trace(go.Candlestick(x=[0], open=[10], high=[10.2], low=[8], close=[10.1], increasing_line_color='green', decreasing_line_color='red'))
+        
+    elif "Shooting Star" in pattern_name:
+        # Long upper wick
+        fig.add_trace(go.Candlestick(x=[0], open=[9], high=[11], low=[8.8], close=[8.9], increasing_line_color='green', decreasing_line_color='red'))
+        
+    elif "Doji" in pattern_name:
+        # Plus sign
+        fig.add_trace(go.Candlestick(x=[0], open=[10], high=[11], low=[9], close=[10.05], increasing_line_color='gray', decreasing_line_color='gray'))
+    
+    fig.update_layout(showlegend=False, xaxis_visible=False, yaxis_visible=False, margin=dict(l=0,r=0,t=0,b=0), height=120)
+    return fig
 
 # --- Logic: THE SNIPER DECISION ENGINE ---
 def get_verdict(row):
@@ -347,7 +417,6 @@ def scan_market():
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    # Get Nifty tickers (skip indices)
     tickers = [v + ".NS" for k, v in STOCK_DICT.items() if not v.startswith("^")]
     tickers = list(set(tickers)) 
     total = len(tickers)
@@ -363,7 +432,6 @@ def scan_market():
                     last = df.iloc[-1]
                     verdict, color, subtitle, reasons = get_verdict(last)
                     
-                    # Only show BUY opportunities
                     if "BUY" in verdict:
                         results.append({
                             "Stock": ticker.replace(".NS", ""),
@@ -379,9 +447,65 @@ def scan_market():
     progress_bar.empty()
     return pd.DataFrame(results).sort_values(by="RSI", ascending=True)
 
+# --- NEW: TOP GAINERS/LOSERS LOGIC ---
+@st.cache_data(ttl=900)
+def get_top_movers():
+    tickers = [v + ".NS" for k, v in STOCK_DICT.items() if not v.startswith("^")]
+    try:
+        # Bulk download for speed (fast execution)
+        data = yf.download(tickers, period="2d", progress=False)
+        
+        # Depending on yfinance version, 'Close' might be MultiIndex or simple
+        if isinstance(data.columns, pd.MultiIndex):
+            close_data = data['Close']
+        else:
+            return pd.DataFrame() # Fallback if structure unexpected
+
+        # Ensure we have at least 2 days of data
+        if len(close_data) < 2: return pd.DataFrame()
+
+        prev_close = close_data.iloc[-2]
+        curr_price = close_data.iloc[-1]
+        
+        # Calculate % Change
+        change = ((curr_price - prev_close) / prev_close) * 100
+        
+        # Create DataFrame
+        df = change.to_frame(name="Change%")
+        df['Price'] = curr_price
+        df.index.name = "Stock"
+        df = df.reset_index()
+        
+        # Clean up ticker names
+        df['Stock'] = df['Stock'].str.replace('.NS', '')
+        return df
+    except: return pd.DataFrame()
+
 # --- MAIN EXECUTION ---
 
-# 1. MARKET SCANNER EXECUTION
+# 1. SHOW TOP GAINERS/LOSERS (NEW)
+if show_movers:
+    st.header("📊 Market Movers (Nifty 100)")
+    with st.spinner("Calculating Top Gainers & Losers..."):
+        movers_df = get_top_movers()
+        if not movers_df.empty:
+            # Sort for Gainers (Highest Change) and Losers (Lowest Change)
+            gainers = movers_df.sort_values(by="Change%", ascending=False).head(5)
+            losers = movers_df.sort_values(by="Change%", ascending=True).head(5)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("🚀 Top 5 Gainers")
+                st.dataframe(gainers.style.format({"Price": "₹{:.2f}", "Change%": "{:+.2f}%"}), use_container_width=True)
+                
+            with col2:
+                st.subheader("🔻 Top 5 Losers")
+                st.dataframe(losers.style.format({"Price": "₹{:.2f}", "Change%": "{:+.2f}%"}), use_container_width=True)
+        else:
+            st.error("Could not fetch market data. Please try again later.")
+
+# 2. MARKET SCANNER EXECUTION
 if run_scan:
     st.header("🎯 Nifty 100 Market Scanner")
     st.info("Scanning for High-Probability BUY signals... To STOP scan, click the 'X' (Stop) in your browser tab.")
@@ -394,7 +518,7 @@ if run_scan:
     else:
         st.warning("No strong BUY signals found right now.")
 
-# 2. SINGLE STOCK ANALYSIS EXECUTION
+# 3. SINGLE STOCK ANALYSIS EXECUTION
 elif run_analysis:
     with st.spinner('Accessing Market Data...'):
         df = get_data(final_ticker, period)
@@ -412,7 +536,6 @@ elif run_analysis:
                         st.sidebar.subheader("🏢 Company Profile")
                         st.sidebar.write(f"**Sector:** {fund['sector']}")
                         
-                        # Color code PE
                         pe = fund['pe']
                         pe_color = "red" if pe > 80 else "orange" if pe > 30 else "green"
                         st.sidebar.markdown(f"**P/E Ratio:** :{pe_color}[{pe:.2f}]")
@@ -439,6 +562,17 @@ elif run_analysis:
                 col1.metric("Price", f"₹{cur['Close']:.2f}")
                 col2.metric("Stochastic %K", f"{cur['STOCH_K']:.1f}", help="Below 20 = Buy, Above 80 = Sell")
                 col3.metric("VWAP", f"₹{cur['VWAP']:.2f}", help="Fair Price")
+                
+                # --- NEW: CANDLESTICK PATTERN SECTION ---
+                patterns = check_patterns(df)
+                if patterns:
+                    st.success(f"🕯️ Price Action Detected: {', '.join(patterns)}")
+                    # Draw the images
+                    cols = st.columns(len(patterns))
+                    for i, pat in enumerate(patterns):
+                        with cols[i]:
+                            st.caption(f"{pat}")
+                            st.plotly_chart(get_pattern_viz(pat), use_container_width=True)
                 
                 # --- STRATEGY CHECKLIST ---
                 with st.expander("See Strategy Logic (Why?)", expanded=True):
